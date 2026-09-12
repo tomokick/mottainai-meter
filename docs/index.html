@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>もったいないメーター</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="残り枠">
+<meta name="theme-color" content="#F3F5F7" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0F1419" media="(prefers-color-scheme: dark)">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-180.png">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+JP:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#F3F5F7; --paper:#FFFFFF; --ink:#16202B; --ink-2:#4B5563; --ink-3:#7C8794;
+  --line:#D9DEE4; --line-2:#E9ECF0;
+  --claude:#C3603A; --claude-soft:#F6E5DC; --codex:#1F8A70; --codex-soft:#DDEFE8;
+  --warn:#B8860B; --warn-soft:#F7EDCB; --crit:#B3261E; --crit-soft:#F9E0DE;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#0F1419; --paper:#171D24; --ink:#E8ECF1; --ink-2:#B4BCC6; --ink-3:#7F8A96;
+    --line:#2A333D; --line-2:#212932;
+    --claude:#E08A63; --claude-soft:#3A241A; --codex:#3DB894; --codex-soft:#15302A;
+    --warn:#E0B341; --warn-soft:#3A2F12; --crit:#EF6A62; --crit-soft:#3B1917;
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink)}
+body{font-family:"IBM Plex Sans JP","Hiragino Sans",system-ui,sans-serif;font-size:15px;line-height:1.5;
+  padding-inline:16px;padding-block:calc(env(safe-area-inset-top) + 16px) calc(env(safe-area-inset-bottom) + 32px);
+  -webkit-text-size-adjust:100%;font-feature-settings:"palt"}
+.wrap{max-width:520px;margin:0 auto}
+.mono{font-family:"IBM Plex Mono",Menlo,monospace;font-variant-numeric:tabular-nums}
+header{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:14px;gap:12px}
+header h1{font-size:20px;margin:0;font-weight:700;letter-spacing:-.01em}
+header .fresh{font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--ink-3);text-align:right}
+header .fresh.stale{color:var(--crit)}
+.banner{background:var(--crit-soft);color:var(--crit);border-radius:10px;padding:10px 14px;font-size:13.5px;margin-bottom:12px}
+.card{background:var(--paper);border:1px solid var(--line);border-radius:16px;padding:14px 16px;margin-bottom:12px}
+.card .h{display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;gap:8px;flex-wrap:wrap}
+.card .h .n{font-weight:700;font-size:16px}
+.card .h .n.claude{color:var(--claude)} .card .h .n.codex{color:var(--codex)}
+.plan{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--ink-3);border:1px solid var(--line);border-radius:999px;padding:1px 8px}
+.win{padding:10px 0;border-top:1px solid var(--line-2)}
+.win:first-of-type{border-top:0;padding-top:0}
+.win .row{display:grid;grid-template-columns:minmax(52px,auto) 1fr 52px;gap:10px;align-items:center}
+.win .l{font-family:"IBM Plex Mono",monospace;font-size:12px;color:var(--ink-3);white-space:nowrap}
+.bar{height:12px;border-radius:6px;background:var(--line-2);overflow:hidden}
+.bar i{display:block;height:100%;border-radius:6px;transition:width .4s}
+.bar.claude i{background:var(--claude)} .bar.codex i{background:var(--codex)}
+.win .v{font-family:"IBM Plex Mono",monospace;font-size:15px;font-weight:500;text-align:right;font-variant-numeric:tabular-nums}
+.win .sub{display:flex;justify-content:space-between;gap:8px;font-size:12.5px;color:var(--ink-3);margin-top:5px;flex-wrap:wrap}
+.win .sub .cd{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
+.pill{display:inline-block;background:var(--warn-soft);color:var(--warn);font-size:11.5px;font-weight:500;padding:1px 8px;border-radius:999px;margin-left:6px;vertical-align:1px}
+.pill.untouched{background:var(--line-2);color:var(--ink-3)}
+.conv{margin:6px 0 0;padding:0;list-style:none;font-size:12.5px;color:var(--ink-2)}
+.conv li{padding-left:1em;text-indent:-1em}
+.conv li::before{content:"・"}
+.conv li.more{display:none}
+.win.open .conv li.more{display:block}
+.win .toggle{background:none;border:0;color:var(--ink-3);font:inherit;font-size:12px;padding:2px 0;cursor:pointer}
+.setup{background:var(--paper);border:1px solid var(--line);border-radius:16px;padding:18px 16px}
+.setup h2{font-size:17px;margin:0 0 8px}
+.setup p{font-size:13.5px;color:var(--ink-2);margin:0 0 12px}
+.setup label{display:block;font-size:12px;color:var(--ink-3);margin-bottom:4px}
+.setup input{width:100%;font:inherit;font-family:"IBM Plex Mono",monospace;font-size:15px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink)}
+.setup .actions{display:flex;gap:8px;margin-top:12px}
+button.primary{font:inherit;font-weight:500;background:var(--ink);color:var(--bg);border:0;border-radius:10px;padding:10px 16px;cursor:pointer}
+button.ghost{font:inherit;background:none;border:1px solid var(--line);color:var(--ink-2);border-radius:10px;padding:10px 14px;cursor:pointer}
+.foot{display:flex;justify-content:space-between;align-items:center;margin-top:8px;font-size:12px;color:var(--ink-3)}
+.foot button{background:none;border:0;color:var(--ink-3);font:inherit;font-size:12px;cursor:pointer;padding:6px 0}
+:focus-visible{outline:2px solid var(--ink);outline-offset:2px}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>残り枠</h1>
+    <div class="fresh mono" id="fresh">読み込み中</div>
+  </header>
+  <div id="banner" class="banner" hidden></div>
+  <div id="cards"></div>
+  <div id="setup" class="setup" hidden>
+    <h2>Mac と繋ぐ</h2>
+    <p>Mac 側の <span class="mono">mottainai.py install</span> が表示したデータ用トピック名を入れてください。この端末にだけ保存されます。</p>
+    <label for="topic">データ用トピック</label>
+    <input id="topic" class="mono" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="mottainai-xxxxxxxx-data">
+    <div class="actions">
+      <button class="primary" id="save">保存して読み込む</button>
+      <button class="ghost" id="cancel" hidden>やめる</button>
+    </div>
+  </div>
+  <div class="foot" id="foot" hidden>
+    <span id="quiet"></span>
+    <span><button id="refresh">更新</button> · <button id="settings">設定</button></span>
+  </div>
+</div>
+<script>
+(function(){
+  const $ = id => document.getElementById(id);
+  const NTFY = "https://ntfy.sh/";
+  const WD = "月火水木金土日";
+  let topic = "", snap = null, timer = null, pollTimer = null;
+
+  try {
+    const m = location.hash.match(/[#&]t=([A-Za-z0-9_-]+)/);
+    if (m) { localStorage.setItem("topic", m[1]); history.replaceState(null, "", location.pathname); }
+    topic = localStorage.getItem("topic") || "";
+  } catch (e) {}
+
+  function fmtDur(sec){
+    sec = Math.max(0, Math.floor(sec));
+    const d = Math.floor(sec/86400), h = Math.floor(sec%86400/3600), m = Math.floor(sec%3600/60), s = sec%60;
+    if (d) return `${d}日${h}時間`;
+    if (h) return `${h}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`;
+    return `${m}:${String(s).padStart(2,"0")}`;
+  }
+  function fmtReset(ts){
+    const dt = new Date(ts*1000), now = new Date();
+    const hm = dt.toLocaleTimeString("ja-JP",{hour:"2-digit",minute:"2-digit"});
+    return dt.toDateString() === now.toDateString() ? hm : `${WD[(dt.getDay()+6)%7]} ${hm}`;
+  }
+  function inQuiet(q){
+    const h = new Date().getHours(); const [a,b] = q || [23,7];
+    return a > b ? (h >= a || h < b) : (h >= a && h < b);
+  }
+  function judge(w, cfg){
+    if (!w.reset || w.used <= 0) return null;
+    const remain = 100 - w.used, ttr = w.reset - Date.now()/1000;
+    const [leadMin, floor] = cfg[w.kind] || [45, 40];
+    if (ttr <= leadMin*60 && remain >= floor) return "time";
+    if (w.pace != null && ttr <= 2*leadMin*60 && remain - w.pace*ttr/3600 >= 30) return "pace";
+    return null;
+  }
+
+  function render(){
+    const cards = $("cards"); cards.innerHTML = "";
+    if (!snap) return;
+    const groups = {claude:[], codex:[]};
+    for (const w of snap.w) (groups[w.id.split(".")[0]] || (groups[w.id.split(".")[0]] = [])).push(w);
+    for (const [prov, wins] of Object.entries(groups)){
+      if (!wins.length) continue;
+      const card = document.createElement("div"); card.className = "card";
+      const name = prov === "claude" ? "Claude" : prov === "codex" ? "Codex" : prov;
+      card.innerHTML = `<div class="h"><span class="n ${prov}">${name}</span>${prov==="codex"&&snap.plan?`<span class="plan">${snap.plan}</span>`:""}${snap.err&&snap.err[prov]?`<span class="pill" style="background:var(--crit-soft);color:var(--crit)">取得失敗</span>`:""}</div>`;
+      for (const w of wins){
+        const remain = Math.max(0, 100 - w.used);
+        const div = document.createElement("div"); div.className = "win"; div.dataset.id = w.id;
+        const label = w.label.replace(/^(Claude|Codex)\s*/, "") || w.kind;
+        const conv = (w.conv || []).map((c,i)=>`<li class="${i>=1?"more":""}">${c}</li>`).join("");
+        div.innerHTML = `
+          <div class="row"><span class="l">${label}</span><div class="bar ${prov}"><i style="width:${remain}%"></i></div><span class="v">${remain.toFixed(0)}%</span></div>
+          <div class="sub"><span class="reset"></span><span class="cd mono"></span></div>
+          ${conv ? `<ul class="conv">${conv}</ul>` : ""}
+          ${(w.conv||[]).length > 1 ? `<button class="toggle" type="button">換算をもっと見る</button>` : ""}`;
+        const t = div.querySelector(".toggle");
+        if (t) t.addEventListener("click", ()=>{ div.classList.toggle("open"); t.textContent = div.classList.contains("open") ? "閉じる" : "換算をもっと見る"; });
+        card.appendChild(div);
+      }
+      cards.appendChild(card);
+    }
+    tick();
+  }
+
+  function tick(){
+    if (!snap) return;
+    const now = Date.now()/1000;
+    for (const w of snap.w){
+      const div = document.querySelector(`.win[data-id="${CSS.escape(w.id)}"]`); if (!div) continue;
+      const reset = div.querySelector(".reset"), cd = div.querySelector(".cd");
+      if (!w.reset){ reset.textContent = "未開始"; cd.textContent = ""; continue; }
+      const ttr = w.reset - now;
+      reset.textContent = `${fmtReset(w.reset)} にリセット`;
+      cd.textContent = ttr > 0 ? `あと ${fmtDur(ttr)}` : "リセット済み（次の取得待ち）";
+      const old = reset.querySelector(".pill"); if (old) old.remove();
+      const j = judge(w, snap.cfg || {});
+      if (w.used <= 0) reset.insertAdjacentHTML("beforeend", `<span class="pill untouched">未使用</span>`);
+      else if (j) reset.insertAdjacentHTML("beforeend", `<span class="pill">${j==="time"?"使い切れる":"余りそう"}</span>`);
+    }
+    const age = now - snap.t;
+    const f = $("fresh");
+    f.textContent = age < 90 ? "いま更新" : age < 3600 ? `更新 ${Math.floor(age/60)}分前` : `更新 ${fmtDur(age)}前`;
+    f.classList.toggle("stale", age > 20*60);
+    $("banner").hidden = age <= 20*60;
+    $("banner").textContent = age > 20*60 ? `Mac からのデータが ${fmtDur(age)} 前で止まっています。Mac がスリープしていないか、launchd の tick.err を確認してください。` : "";
+    $("quiet").textContent = inQuiet(snap.quiet) ? `静音時間帯（${snap.quiet[0]}–${snap.quiet[1]} 時）のため通知は止まっています` : "";
+  }
+
+  async function load(){
+    if (!topic) return;
+    $("fresh").textContent = "取得中";
+    try {
+      let lines = await fetchLines("40m");
+      if (!lines.length) lines = await fetchLines("all");
+      const msgs = lines.filter(m => m.event === "message").sort((a,b)=>a.time-b.time);
+      if (!msgs.length){
+        $("fresh").textContent = "データなし";
+        $("banner").hidden = false;
+        $("banner").textContent = "このトピックにまだスナップショットがありません。Mac 側で tick が動いているか、トピック名が合っているか確認してください。";
+        return;
+      }
+      snap = JSON.parse(msgs[msgs.length-1].message);
+      render();
+    } catch (e) {
+      $("fresh").textContent = "取得失敗";
+      $("banner").hidden = false;
+      $("banner").textContent = "ntfy に接続できませんでした。電波か ntfy.sh の状態を確認してください。";
+    }
+  }
+  async function fetchLines(since){
+    const r = await fetch(`${NTFY}${encodeURIComponent(topic)}/json?poll=1&since=${since}`, {cache:"no-store"});
+    if (!r.ok) throw new Error(r.status);
+    const text = await r.text();
+    return text.split("\n").filter(Boolean).map(l => { try { return JSON.parse(l); } catch(e){ return null; } }).filter(Boolean);
+  }
+
+  function showSetup(cancelable){
+    $("setup").hidden = false; $("cards").hidden = true; $("foot").hidden = true;
+    $("cancel").hidden = !cancelable; $("topic").value = topic;
+    setTimeout(()=>$("topic").focus(), 50);
+  }
+  function showMain(){
+    $("setup").hidden = true; $("cards").hidden = false; $("foot").hidden = false;
+  }
+  $("save").addEventListener("click", ()=>{
+    const v = $("topic").value.trim(); if (!v) return;
+    topic = v; try { localStorage.setItem("topic", v); } catch(e){}
+    showMain(); load();
+  });
+  $("cancel").addEventListener("click", ()=>{ showMain(); });
+  $("settings").addEventListener("click", ()=>showSetup(true));
+  $("refresh").addEventListener("click", load);
+  document.addEventListener("visibilitychange", ()=>{ if (!document.hidden) load(); });
+
+  if (topic){ showMain(); load(); } else { showSetup(false); $("fresh").textContent = ""; }
+  timer = setInterval(tick, 1000);
+  pollTimer = setInterval(()=>{ if (!document.hidden) load(); }, 60000);
+})();
+</script>
+</body>
+</html>
