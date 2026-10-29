@@ -19,6 +19,7 @@ STATE_DIR = os.path.expanduser("~/.local/share/mottainai")
 HISTORY_PATH = os.path.join(STATE_DIR, "history.jsonl")
 ALERTED_PATH = os.path.join(STATE_DIR, "alerted.json")
 LAST_PATH = os.path.join(STATE_DIR, "last.json")
+CLAUDE_RESETS_PATH = os.path.join(STATE_DIR, "claude-resets-observed.json")
 LAUNCHD_LABEL = "jp.orgm.mottainai"
 LAUNCHD_PATH = os.path.expanduser(f"~/Library/LaunchAgents/{LAUNCHD_LABEL}.plist")
 JST = timezone(timedelta(hours=9))
@@ -168,7 +169,7 @@ def refresh_claude(full, cfg):
     return cred
 
 
-def fetch_claude(cfg):
+def fetch_claude(cfg, details=None):
     full = load_claude_credentials()
     cred = full["claudeAiOauth"]
     if cred.get("expiresAt") and cred["expiresAt"] / 1000 < now_ts() + 300:
@@ -185,7 +186,9 @@ def fetch_claude(cfg):
         "User-Agent": f"claude-code/{cfg['claude_code_version']}",
         "Accept": "application/json",
     }
-    _, data = http_json("https://api.anthropic.com/api/oauth/usage", headers)
+    _, data = http_json("https://api.anthropic.com/api/oauth/usage?cedar_ember=1", headers)
+    if details is not None:
+        details.update(claude_reset_details(data))
     wins = []
     for lim in data.get("limits") or []:
         rs = lim.get("resets_at")
@@ -209,6 +212,58 @@ def fetch_claude(cfg):
                              used=float(w.get("utilization") or 0),
                              resets_at=datetime.fromisoformat(rs).timestamp() if rs else None))
     return wins
+
+
+def claude_reset_details(data):
+    """Only explicit, supported grant responses can establish a live count."""
+    value = data.get("cedar_ember")
+    unknown = {"status": "unknown", "available": None}
+    if not isinstance(value, dict):
+        return unknown
+    if value.get("ineligible_reason") == "surface":
+        return {**unknown, "status": "unsupported"}
+    if value.get("eligible") is False and value.get("ineligible_reason") == "no_grant":
+        return {"status": "live", "available": 0, "expires_at": None}
+    if value.get("eligible") is not True or not isinstance(value.get("grants"), list):
+        return unknown
+    total, ends, seen = 0, [], set()
+    for grant in value["grants"]:
+        if not isinstance(grant, dict):
+            return unknown
+        left, maximum = grant.get("resets_left"), grant.get("resets_total")
+        if (type(left) is not int or left < 0 or type(maximum) is not int
+                or maximum < 1 or not isinstance(grant.get("id"), str)):
+            return unknown
+        try:
+            expiry = datetime.fromisoformat(grant["ends_at"].replace("Z", "+00:00")).timestamp()
+        except (KeyError, TypeError, ValueError, AttributeError):
+            return unknown
+        if grant["id"] in seen:
+            continue
+        seen.add(grant["id"])
+        if expiry <= now_ts() or grant.get("paused") is True:
+            continue
+        count = min(left, maximum)
+        total += count
+        if count:
+            ends.append(expiry)
+    return {"status": "live", "available": total, "expires_at": min(ends) if ends else None}
+
+
+def claude_reset_observation():
+    observed = load_json(CLAUDE_RESETS_PATH, {})
+    if (type(observed.get("available")) is int and observed["available"] >= 0
+            and type(observed.get("checked_at")) in (int, float)):
+        return {k: observed[k] for k in ("available", "checked_at")}
+    return None
+
+
+def cmd_record_claude_resets(cfg):
+    if len(sys.argv) != 3 or not sys.argv[2].isdigit():
+        raise SystemExit("使い方: mottainai.py record-claude-resets <公式画面で確認した残数>")
+    observed = {"available": int(sys.argv[2]), "checked_at": now_ts()}
+    save_json(CLAUDE_RESETS_PATH, observed)
+    print(f"Claude公式画面の確認値を記録: {observed['available']}回（自動取得値とは別表示）")
 
 
 def _jwt_claims(tok):
@@ -567,13 +622,13 @@ def data_topic(cfg):
     return cfg.get("ntfy_data_topic") or (cfg["ntfy_topic"] + "-data" if cfg.get("ntfy_topic") else "")
 
 
-def publish_snapshot(cfg, wins, errors, plan, details=None):
+def publish_snapshot(cfg, wins, errors, plan, details=None, claude_details=None):
     """iPhone の Web 画面向けに、最新状態を ntfy のデータ用トピックへ 1 通流す（4KB 以内）。"""
     topic = data_topic(cfg)
     if not topic:
         return False
     snap = {
-        "t": int(now_ts()), "plan": plan, "err": errors, "codex": details or {},
+        "t": int(now_ts()), "plan": plan, "err": errors, "codex": details or {}, "claude": claude_details or {},
         "cfg": {k: [v["lead_min"], v["floor_percent"]] for k, v in cfg["windows"].items()},
         "quiet": cfg["quiet_hours"],
         "w": [{"id": w["id"], "label": w["label"], "kind": w["kind"], "used": round(w["used"], 1),
@@ -596,8 +651,9 @@ def publish_snapshot(cfg, wins, errors, plan, details=None):
 # ---------- commands ----------
 def collect(cfg):
     wins, errors, plan, details = [], {}, None, {}
+    claude_details = {"status": "unknown", "available": None}
     try:
-        wins += fetch_claude(cfg)
+        wins += fetch_claude(cfg, claude_details)
     except Exception as e:  # noqa: BLE001
         errors["claude"] = str(e)
     try:
@@ -605,12 +661,21 @@ def collect(cfg):
         wins += cw
     except Exception as e:  # noqa: BLE001
         errors["codex"] = str(e)
-    return wins, errors, plan, details
+    observed = claude_reset_observation()
+    if observed:
+        claude_details["observed"] = observed
+    return wins, errors, plan, details, claude_details
 
 
 def cmd_status(cfg):
-    wins, errors, plan, details = collect(cfg)
+    wins, errors, plan, details, claude_details = collect(cfg)
     print(f"更新 {datetime.now(JST).strftime('%m/%d %H:%M')}" + (f"  Codex plan: {plan}" if plan else ""))
+    value = claude_details.get("available")
+    print("  Claude リセットチケット: " + (f"{value}回" if value is not None else "自動取得できません"))
+    observed = claude_details.get("observed")
+    if value is None and observed:
+        stamp = datetime.fromtimestamp(observed["checked_at"], JST).strftime("%m/%d %H:%M")
+        print(f"    公式画面の前回確認: {observed['available']}回（{stamp}）")
     for line in codex_detail_lines(details):
         print("  Codex " + line)
     for w in wins:
@@ -639,10 +704,10 @@ def cmd_status(cfg):
 
 
 def cmd_tick(cfg):
-    wins, errors, plan, details = collect(cfg)
+    wins, errors, plan, details, claude_details = collect(cfg)
     append_history(wins, errors)
-    save_json(LAST_PATH, {"t": now_ts(), "windows": wins, "errors": errors, "plan": plan, "codex": details})
-    published = publish_snapshot(cfg, wins, errors, plan, details)
+    save_json(LAST_PATH, {"t": now_ts(), "windows": wins, "errors": errors, "plan": plan, "codex": details, "claude": claude_details})
+    published = publish_snapshot(cfg, wins, errors, plan, details, claude_details)
     alerted = load_json(ALERTED_PATH, {})
     fired = []
     if not in_quiet_hours(cfg):
@@ -738,7 +803,7 @@ def main():
     cmd = sys.argv[1] if len(sys.argv) > 1 else "status"
     cfg = load_config()
     {"status": cmd_status, "tick": cmd_tick, "install": cmd_install,
-     "uninstall": cmd_uninstall, "test-notify": cmd_test_notify}.get(cmd, lambda c: print(__doc__))(cfg)
+     "record-claude-resets": cmd_record_claude_resets, "uninstall": cmd_uninstall, "test-notify": cmd_test_notify}.get(cmd, lambda c: print(__doc__))(cfg)
 
 
 if __name__ == "__main__":

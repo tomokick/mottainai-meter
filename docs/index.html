@@ -54,6 +54,8 @@ header .fresh.stale{color:var(--crit)}
 .win .v{font-family:"IBM Plex Mono",monospace;font-size:15px;font-weight:500;text-align:right;font-variant-numeric:tabular-nums}
 .win .sub{display:flex;justify-content:space-between;gap:8px;font-size:12.5px;color:var(--ink-3);margin-top:5px;flex-wrap:wrap}
 .win .sub .cd{font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
+.reset-info{font-size:12.5px;color:var(--ink-3);line-height:1.6}
+.reset-info a{display:inline-block;color:inherit;font-size:12px;margin-top:4px;text-underline-offset:3px}
 .pill{display:inline-block;background:var(--warn-soft);color:var(--warn);font-size:11.5px;font-weight:500;padding:1px 8px;border-radius:999px;margin-left:6px;vertical-align:1px}
 .pill.untouched{background:var(--line-2);color:var(--ink-3)}
 .conv{margin:6px 0 0;padding:0;list-style:none;font-size:12.5px;color:var(--ink-2)}
@@ -161,23 +163,34 @@ button.ghost{font:inherit;background:none;border:1px solid var(--line);color:var
         if (t) t.addEventListener("click", ()=>{ div.classList.toggle("open"); t.textContent = div.classList.contains("open") ? "閉じる" : "換算をもっと見る"; });
         card.appendChild(div);
       }
-      if (prov === "codex") {
-        const detail = snap.codex || {}, tickets = detail.reset_tickets || {};
+      if (prov === "codex" || prov === "claude") {
+        const detail = snap[prov] || {}, tickets = detail.reset_tickets || {};
         const count = v => Number.isInteger(v) && v >= 0 ? `${v}回` : "未取得";
-        const note = document.createElement("div"); note.className = "win";
-        const lines = [
+        const note = document.createElement("div"); note.className = "win reset-info";
+        const lines = prov === "codex" ? [
           "5時間枠: " + ({present:"あり", not_reported:"現在の取得結果に5時間枠なし"}[detail.five_hour] || "未確認"),
           `リセットチケット: 保有 ${count(tickets.available)}`,
           `現在適用可能: ${count(tickets.applicable)}`,
           "期限・適用条件は公式画面で確認"
-        ];
+        ] : [`リセットチケット: ${count(detail.available)}`];
+        if (prov === "claude" && detail.available == null) {
+          lines.push(detail.status === "unsupported" ? "現在の認証では自動取得できません" : "リセット情報を取得できていません");
+          const obs = detail.observed;
+          if (obs && Number.isInteger(obs.available) && Number.isFinite(obs.checked_at)) {
+            const stamp = new Date(obs.checked_at*1000).toLocaleString("ja-JP", {month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"});
+            lines.push(`公式画面の前回確認: ${count(obs.available)}（${stamp}）`);
+          }
+        }
+        if (prov === "claude" && detail.expires_at) {
+          lines.push("最短の有効期限: " + new Date(detail.expires_at*1000).toLocaleString("ja-JP"));
+        }
         for (const line of lines) {
           const row = document.createElement("div"); row.textContent = line; note.appendChild(row);
         }
         const link = document.createElement("a");
-        link.href = "https://chatgpt.com/codex/settings/usage";
+        link.href = prov === "codex" ? "https://chatgpt.com/codex/settings/usage" : "https://claude.ai/settings/usage";
         link.target = "_blank"; link.rel = "noopener noreferrer";
-        link.textContent = "Codexの使用状況を開く"; note.appendChild(link);
+        link.textContent = `${name}の使用状況を開く`; note.appendChild(link);
         card.appendChild(note);
       }
       cards.appendChild(card);

@@ -34,7 +34,7 @@ class CodexDetailsTests(unittest.TestCase):
     def test_fetch_failure_does_not_reuse_counts(self):
         with patch.object(m, "fetch_claude", return_value=[]), patch.object(
                 m, "fetch_codex", side_effect=RuntimeError("offline")):
-            wins, errors, plan, details = m.collect({})
+            wins, errors, plan, details, claude = m.collect({})
         self.assertEqual(details, {})
         self.assertIn("codex", errors)
 
