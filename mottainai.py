@@ -280,7 +280,33 @@ def fetch_codex(cfg):
     for extra in data.get("additional_rate_limits") or []:
         name = extra.get("limit_name") or "extra"
         add(f"codex.{name.lower()}", f"Codex {name}", extra.get("rate_limit"))
-    return wins, data.get("plan_type")
+    return wins, data.get("plan_type"), codex_details(data, wins)
+
+
+def codex_details(data, wins):
+    """Keep absent reset counts unknown; never mistake purchased credits for resets."""
+    resets = data.get("rate_limit_reset_credits") or {}
+    def count(key):
+        value = resets.get(key)
+        return value if type(value) is int and value >= 0 else None
+    return {
+        "five_hour": "present" if any(w["id"] == "codex.5h" for w in wins)
+                     else "not_reported" if data.get("rate_limit") else "unknown",
+        "reset_tickets": {
+            "available": count("available_count"),
+            "applicable": count("applicable_available_count"),
+        },
+    }
+
+
+def codex_detail_lines(details):
+    state = details.get("five_hour")
+    lines = ["5時間枠: " + {"present": "あり", "not_reported": "現在のAPI応答に5時間枠なし"}.get(state, "未確認")]
+    tickets = details.get("reset_tickets") or {}
+    count = lambda v: "未取得" if v is None else f"{v}回"
+    lines.append(f"リセットチケット: 保有 {count(tickets.get('available'))} / 現在適用可能 {count(tickets.get('applicable'))}")
+    lines.append("チケットの期限・適用条件は公式の使用状況画面で確認")
+    return lines
 
 
 # ---------- history / pace ----------
@@ -541,13 +567,13 @@ def data_topic(cfg):
     return cfg.get("ntfy_data_topic") or (cfg["ntfy_topic"] + "-data" if cfg.get("ntfy_topic") else "")
 
 
-def publish_snapshot(cfg, wins, errors, plan):
+def publish_snapshot(cfg, wins, errors, plan, details=None):
     """iPhone の Web 画面向けに、最新状態を ntfy のデータ用トピックへ 1 通流す（4KB 以内）。"""
     topic = data_topic(cfg)
     if not topic:
         return False
     snap = {
-        "t": int(now_ts()), "plan": plan, "err": errors,
+        "t": int(now_ts()), "plan": plan, "err": errors, "codex": details or {},
         "cfg": {k: [v["lead_min"], v["floor_percent"]] for k, v in cfg["windows"].items()},
         "quiet": cfg["quiet_hours"],
         "w": [{"id": w["id"], "label": w["label"], "kind": w["kind"], "used": round(w["used"], 1),
@@ -569,22 +595,24 @@ def publish_snapshot(cfg, wins, errors, plan):
 
 # ---------- commands ----------
 def collect(cfg):
-    wins, errors, plan = [], {}, None
+    wins, errors, plan, details = [], {}, None, {}
     try:
         wins += fetch_claude(cfg)
     except Exception as e:  # noqa: BLE001
         errors["claude"] = str(e)
     try:
-        cw, plan = fetch_codex(cfg)
+        cw, plan, details = fetch_codex(cfg)
         wins += cw
     except Exception as e:  # noqa: BLE001
         errors["codex"] = str(e)
-    return wins, errors, plan
+    return wins, errors, plan, details
 
 
 def cmd_status(cfg):
-    wins, errors, plan = collect(cfg)
+    wins, errors, plan, details = collect(cfg)
     print(f"更新 {datetime.now(JST).strftime('%m/%d %H:%M')}" + (f"  Codex plan: {plan}" if plan else ""))
+    for line in codex_detail_lines(details):
+        print("  Codex " + line)
     for w in wins:
         remain = 100 - w["used"]
         bar = "█" * int(remain // 5) + "░" * (20 - int(remain // 5))
@@ -611,10 +639,10 @@ def cmd_status(cfg):
 
 
 def cmd_tick(cfg):
-    wins, errors, plan = collect(cfg)
+    wins, errors, plan, details = collect(cfg)
     append_history(wins, errors)
-    save_json(LAST_PATH, {"t": now_ts(), "windows": wins, "errors": errors, "plan": plan})
-    published = publish_snapshot(cfg, wins, errors, plan)
+    save_json(LAST_PATH, {"t": now_ts(), "windows": wins, "errors": errors, "plan": plan, "codex": details})
+    published = publish_snapshot(cfg, wins, errors, plan, details)
     alerted = load_json(ALERTED_PATH, {})
     fired = []
     if not in_quiet_hours(cfg):

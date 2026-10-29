@@ -143,7 +143,7 @@ button.ghost{font:inherit;background:none;border:1px solid var(--line);color:var
     const groups = {claude:[], codex:[]};
     for (const w of snap.w) (groups[w.id.split(".")[0]] || (groups[w.id.split(".")[0]] = [])).push(w);
     for (const [prov, wins] of Object.entries(groups)){
-      if (!wins.length) continue;
+      if (!wins.length && prov !== "codex" && !(snap.err || {})[prov]) continue;
       const card = document.createElement("div"); card.className = "card";
       const name = prov === "claude" ? "Claude" : prov === "codex" ? "Codex" : prov;
       card.innerHTML = `<div class="h"><span class="n ${prov}">${name}</span>${prov==="codex"&&snap.plan?`<span class="plan">${snap.plan}</span>`:""}${snap.err&&snap.err[prov]?`<span class="pill" style="background:var(--crit-soft);color:var(--crit)">取得失敗</span>`:""}</div>`;
@@ -160,6 +160,25 @@ button.ghost{font:inherit;background:none;border:1px solid var(--line);color:var
         const t = div.querySelector(".toggle");
         if (t) t.addEventListener("click", ()=>{ div.classList.toggle("open"); t.textContent = div.classList.contains("open") ? "閉じる" : "換算をもっと見る"; });
         card.appendChild(div);
+      }
+      if (prov === "codex") {
+        const detail = snap.codex || {}, tickets = detail.reset_tickets || {};
+        const count = v => Number.isInteger(v) && v >= 0 ? `${v}回` : "未取得";
+        const note = document.createElement("div"); note.className = "win";
+        const lines = [
+          "5時間枠: " + ({present:"あり", not_reported:"現在の取得結果に5時間枠なし"}[detail.five_hour] || "未確認"),
+          `リセットチケット: 保有 ${count(tickets.available)}`,
+          `現在適用可能: ${count(tickets.applicable)}`,
+          "期限・適用条件は公式画面で確認"
+        ];
+        for (const line of lines) {
+          const row = document.createElement("div"); row.textContent = line; note.appendChild(row);
+        }
+        const link = document.createElement("a");
+        link.href = "https://chatgpt.com/codex/settings/usage";
+        link.target = "_blank"; link.rel = "noopener noreferrer";
+        link.textContent = "Codexの使用状況を開く"; note.appendChild(link);
+        card.appendChild(note);
       }
       cards.appendChild(card);
     }
